@@ -40,7 +40,7 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 png = "0.17"
 fast_image_resize = "6"
 opus = "0.3"
-rubato = "0.16"
+rubato = "2.0"
 # Raw libvorbis bindings. We use this directly (not through `vorbis_rs`) to
 # bypass the Ogg container and operate on raw Vorbis packets — see
 # `docs/codec-implementation.md` for the rationale. `ogg_next_sys` is required
