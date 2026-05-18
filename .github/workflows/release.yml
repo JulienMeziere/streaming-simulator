@@ -42,11 +42,11 @@ jobs:
     steps:
       - name: Checkout (tag from push)
         if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout (manual dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}
 
