@@ -18,7 +18,8 @@
 //! codec; `decode_rate` may differ (MP3 auto-downsample) and is updated
 //! via [`setup_i2h`].
 
-use rubato::{FftFixedIn, Resampler};
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
+use rubato::{Fft, FixedSync, Resampler};
 use std::collections::VecDeque;
 
 /// rubato's default; quality/latency sweet spot for music.
@@ -35,8 +36,8 @@ pub struct ResampledPipeline {
     /// downsample); updated via [`setup_i2h`].
     pub decode_rate: u32,
 
-    h2i: Option<FftFixedIn<f32>>,
-    i2h: Option<FftFixedIn<f32>>,
+    h2i: Option<Fft<f32>>,
+    i2h: Option<Fft<f32>>,
     pub h2i_chunk: usize,
     pub i2h_chunk: usize,
     h2i_in_buf: Vec<Vec<f32>>,
@@ -138,12 +139,13 @@ impl ResampledPipeline {
         }
         // ~20 ms chunk: clean rubato ratio across all common host rates.
         let chunk = (self.host_rate as usize) / 50;
-        let r = match FftFixedIn::<f32>::new(
+        let r = match Fft::<f32>::new(
             self.host_rate as usize,
             self.encode_rate as usize,
             chunk,
             RESAMPLER_SUB_CHUNKS,
             self.channels,
+            FixedSync::Input,
         ) {
             Ok(r) => r,
             Err(_) => return false,
@@ -170,12 +172,13 @@ impl ResampledPipeline {
             return true;
         }
         let chunk = (decode_rate as usize) / 50;
-        let r = match FftFixedIn::<f32>::new(
+        let r = match Fft::<f32>::new(
             decode_rate as usize,
             self.host_rate as usize,
             chunk,
             RESAMPLER_SUB_CHUNKS,
             self.channels,
+            FixedSync::Input,
         ) {
             Ok(r) => r,
             Err(_) => return false,
@@ -283,12 +286,21 @@ impl ResampledPipeline {
             }
             Some(r) => {
                 let chunk = self.h2i_chunk;
+                let out_max = self.h2i_out_buf[0].len();
                 while self.host_input[0].len() >= chunk {
                     for ch in 0..self.channels {
                         bulk_drain(&mut self.host_input[ch], &mut self.h2i_in_buf[ch], chunk);
                     }
+                    // Adapter wrappers are zero-alloc — they just store
+                    // references and dimensions. Real-time safe.
+                    let in_adapter =
+                        SequentialSliceOfVecs::new(&self.h2i_in_buf, self.channels, chunk)
+                            .expect("h2i in-buffer dimensions match");
+                    let mut out_adapter =
+                        SequentialSliceOfVecs::new_mut(&mut self.h2i_out_buf, self.channels, out_max)
+                            .expect("h2i out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.h2i_in_buf, &mut self.h2i_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     for ch in 0..self.channels {
@@ -320,6 +332,7 @@ impl ResampledPipeline {
             }
             Some(r) => {
                 let chunk = self.i2h_chunk;
+                let out_max = self.i2h_out_buf[0].len();
                 while self.internal_output[0].len() >= chunk {
                     for ch in 0..self.channels {
                         bulk_drain(
@@ -328,8 +341,14 @@ impl ResampledPipeline {
                             chunk,
                         );
                     }
+                    let in_adapter =
+                        SequentialSliceOfVecs::new(&self.i2h_in_buf, self.channels, chunk)
+                            .expect("i2h in-buffer dimensions match");
+                    let mut out_adapter =
+                        SequentialSliceOfVecs::new_mut(&mut self.i2h_out_buf, self.channels, out_max)
+                            .expect("i2h out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.i2h_in_buf, &mut self.i2h_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     for ch in 0..self.channels {

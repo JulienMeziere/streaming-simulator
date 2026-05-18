@@ -28,8 +28,9 @@ use lc3_codec::{
     decoder::lc3_decoder::Lc3Decoder,
     encoder::lc3_encoder::Lc3Encoder,
 };
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
 use nih_plug::buffer::Buffer;
-use rubato::{FftFixedIn, Resampler};
+use rubato::{Fft, FixedSync, Resampler};
 use std::collections::VecDeque;
 
 const LC3_RATE: u32 = 48_000;
@@ -91,8 +92,8 @@ pub struct Lc3Codec {
     host_channels: usize,
     codec_channels: usize,
 
-    h2c: Option<FftFixedIn<f32>>,
-    c2h: Option<FftFixedIn<f32>>,
+    h2c: Option<Fft<f32>>,
+    c2h: Option<Fft<f32>>,
     h2c_chunk: usize,
     c2h_chunk: usize,
     h2c_in_buf: Vec<Vec<f32>>,
@@ -221,20 +222,22 @@ impl Lc3Codec {
             let c2h_chunk = (LC3_RATE as usize / 100).max(1);
             // Resampler runs at host_channels — mono fold-down happens
             // *after* resampling, at the encoder boundary.
-            let h2c = FftFixedIn::<f32>::new(
+            let h2c = Fft::<f32>::new(
                 self.sample_rate as usize,
                 LC3_RATE as usize,
                 h2c_chunk,
                 RESAMPLER_SUB_CHUNKS,
                 self.host_channels,
+                FixedSync::Input,
             )
             .expect("LC3 h2c resampler init");
-            let c2h = FftFixedIn::<f32>::new(
+            let c2h = Fft::<f32>::new(
                 LC3_RATE as usize,
                 self.sample_rate as usize,
                 c2h_chunk,
                 RESAMPLER_SUB_CHUNKS,
                 self.host_channels,
+                FixedSync::Input,
             )
             .expect("LC3 c2h resampler init");
             let h2c_out_max = h2c.output_frames_max();
@@ -343,15 +346,25 @@ impl Lc3Codec {
                 }
             }
             Some(r) => {
-                while self.host_in[0].len() >= self.h2c_chunk {
+                let chunk = self.h2c_chunk;
+                let out_max = self.h2c_out_buf[0].len();
+                while self.host_in[0].len() >= chunk {
                     for ch in 0..self.host_channels {
                         let head = self.host_in[ch].make_contiguous();
-                        self.h2c_in_buf[ch][..self.h2c_chunk]
-                            .copy_from_slice(&head[..self.h2c_chunk]);
-                        self.host_in[ch].drain(..self.h2c_chunk);
+                        self.h2c_in_buf[ch][..chunk].copy_from_slice(&head[..chunk]);
+                        self.host_in[ch].drain(..chunk);
                     }
+                    let in_adapter =
+                        SequentialSliceOfVecs::new(&self.h2c_in_buf, self.host_channels, chunk)
+                            .expect("LC3 h2c in-buffer dimensions match");
+                    let mut out_adapter = SequentialSliceOfVecs::new_mut(
+                        &mut self.h2c_out_buf,
+                        self.host_channels,
+                        out_max,
+                    )
+                    .expect("LC3 h2c out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.h2c_in_buf, &mut self.h2c_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     for ch in 0..self.host_channels {
@@ -419,15 +432,25 @@ impl Lc3Codec {
                 }
             }
             Some(r) => {
+                let chunk = self.c2h_chunk;
+                let out_max = self.c2h_out_buf[0].len();
                 let mut idx = 0usize;
-                while idx + self.c2h_chunk <= n {
+                while idx + chunk <= n {
                     for ch in 0..self.host_channels {
-                        self.c2h_in_buf[ch][..self.c2h_chunk].copy_from_slice(
-                            &self.c_to_h_intermediate[ch][idx..idx + self.c2h_chunk],
-                        );
+                        self.c2h_in_buf[ch][..chunk]
+                            .copy_from_slice(&self.c_to_h_intermediate[ch][idx..idx + chunk]);
                     }
+                    let in_adapter =
+                        SequentialSliceOfVecs::new(&self.c2h_in_buf, self.host_channels, chunk)
+                            .expect("LC3 c2h in-buffer dimensions match");
+                    let mut out_adapter = SequentialSliceOfVecs::new_mut(
+                        &mut self.c2h_out_buf,
+                        self.host_channels,
+                        out_max,
+                    )
+                    .expect("LC3 c2h out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.c2h_in_buf, &mut self.c2h_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     for ch in 0..self.host_channels {
@@ -435,10 +458,10 @@ impl Lc3Codec {
                         self.host_out[ch]
                             .extend(self.c2h_out_buf[ch][..produced].iter().copied());
                     }
-                    idx += self.c2h_chunk;
+                    idx += chunk;
                 }
-                // Any tail < c2h_chunk is dropped; at steady state the
-                // ring drains to a multiple of `c2h_chunk` per block.
+                // Any tail < chunk is dropped; at steady state the
+                // ring drains to a multiple of `chunk` per block.
             }
         }
     }
