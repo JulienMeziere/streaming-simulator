@@ -49,7 +49,7 @@ rubato = "0.16"
 aotuv_lancer_vorbis_sys = "0.1"
 ogg_next_sys = "0.1"
 # Optional (see `fdk-aac` feature). Provides AAC-LC + HE-AAC v2 codecs.
-fdk-aac = { version = "0.7", optional = true }
+fdk-aac = { version = "0.8", optional = true }
 # LAME MP3 encoder. LGPL-2.1-or-later — fine to bundle with our GPL-3.0 plugin.
 # Used by Deezer's Basic / Standard / High Quality tiers.
 mp3lame-encoder = "0.2"
