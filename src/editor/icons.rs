@@ -36,14 +36,16 @@ pub(super) fn load_icon(
 
     // Decode to 8-bit RGBA. Transformations normalise any valid PNG
     // (palette / grayscale / 16-bit) to plain RGBA8 for the resize step.
-    let mut decoder = png::Decoder::new(png_bytes);
+    // png 0.18 requires Read + Seek on the source, so wrap our embedded
+    // byte slice in an io::Cursor.
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
     decoder.set_transformations(
         png::Transformations::ALPHA | png::Transformations::EXPAND | png::Transformations::STRIP_16,
     );
     let mut reader = decoder.read_info().expect("failed to read PNG header");
     let info = reader.info();
     let (sw, sh) = (info.width, info.height);
-    let mut src_buf = vec![0u8; reader.output_buffer_size()];
+    let mut src_buf = vec![0u8; reader.output_buffer_size().expect("PNG output buffer size known after read_info")];
     reader
         .next_frame(&mut src_buf)
         .expect("failed to decode PNG");

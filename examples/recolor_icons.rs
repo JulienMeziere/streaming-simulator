@@ -19,7 +19,7 @@
 
 use png::{BitDepth, ColorType, Decoder, Encoder};
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 const ICONS: &[&str] = &[
@@ -43,11 +43,16 @@ fn main() {
 
 fn recolor_to_white(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(path);
-    let file = File::open(path)?;
+    let file = BufReader::new(File::open(path)?);
     let decoder = Decoder::new(file);
     let mut reader = decoder.read_info()?;
 
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let mut buf = vec![
+        0u8;
+        reader
+            .output_buffer_size()
+            .ok_or("PNG output buffer size unknown")?
+    ];
     let info = reader.next_frame(&mut buf)?;
     let width = info.width;
     let height = info.height;
