@@ -1,0 +1,4 @@
+# All changes are reviewed by the maintainer.
+# Combined with branch protection's "require pull request" rule this
+# makes external PRs go through review before landing on `main`.
+*       @JulienMeziere

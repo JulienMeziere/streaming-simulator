@@ -1,0 +1,42 @@
+name: Feature request
+description: New platform, codec, or UI improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! For new platforms or codec
+        accuracy improvements, please cite a reliable source
+        (developer docs, RFC, official platform whitepaper, etc.) so
+        we can match the real-world chain instead of guessing.
+
+        See [docs/codecs.md](https://github.com/JulienMeziere/streaming-simulator/blob/main/docs/codecs.md)
+        for the kind of detail that's helpful.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do, and why does the current plugin not let you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources / references
+      description: |
+        Links, papers, or specs that back up the proposed parameters.
+        Especially important for new codec/platform additions.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

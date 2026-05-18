@@ -1,0 +1,86 @@
+name: Bug report
+description: Something is broken or sounds wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please fill in
+        as much of the form as you can — the more reproducible the
+        report, the faster it gets fixed.
+
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: Visible in the editor's `?` (info) popup.
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: DAW / host
+      placeholder: "FL Studio 21.2, Reaper 7.x, Bitwig 5.x, …"
+    validations:
+      required: true
+
+  - type: input
+    id: format
+    attributes:
+      label: Plugin format
+      placeholder: "CLAP / VST3 / standalone"
+    validations:
+      required: true
+
+  - type: input
+    id: sample_rate
+    attributes:
+      label: Project sample rate & buffer size
+      placeholder: "44.1 kHz, 512 samples"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Be specific — "loaded plugin, selected Spotify Low, no sound" is
+        much easier to debug than "it doesn't work".
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Any DAW logs, console output, or screenshots that help.
