@@ -25,7 +25,8 @@ use channel::FmChannel;
 use decoder::MpxDecoder;
 use encoder::MpxEncoder;
 
-use rubato::{FftFixedIn, Resampler};
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
+use rubato::{Fft, FixedSync, Resampler};
 use std::collections::VecDeque;
 
 pub const MPX_RATE: u32 = 192_000;
@@ -58,8 +59,8 @@ pub struct MpxPipeline {
     m2h_chunk: usize,
 
     /// `None` when `host_rate == MPX_RATE` (no resample needed).
-    h2m: Option<FftFixedIn<f32>>,
-    m2h: Option<FftFixedIn<f32>>,
+    h2m: Option<Fft<f32>>,
+    m2h: Option<Fft<f32>>,
 
     h2m_in_buf: Vec<Vec<f32>>,
     h2m_out_buf: Vec<Vec<f32>>,
@@ -131,22 +132,24 @@ impl MpxPipeline {
             // matching output chunk size.
             let h2m_chunk = (host_rate as usize / 100).max(1);
             let m2h_chunk = (MPX_RATE as usize / 100).max(1);
-            let h2m = match FftFixedIn::<f32>::new(
+            let h2m = match Fft::<f32>::new(
                 host_rate as usize,
                 MPX_RATE as usize,
                 h2m_chunk,
                 2,
                 2,
+                FixedSync::Input,
             ) {
                 Ok(r) => r,
                 Err(_) => return false,
             };
-            let m2h = match FftFixedIn::<f32>::new(
+            let m2h = match Fft::<f32>::new(
                 MPX_RATE as usize,
                 host_rate as usize,
                 m2h_chunk,
                 2,
                 2,
+                FixedSync::Input,
             ) {
                 Ok(r) => r,
                 Err(_) => return false,
@@ -237,14 +240,20 @@ impl MpxPipeline {
             }
             Some(r) => {
                 let chunk = self.h2m_chunk;
+                let out_max = self.h2m_out_buf[0].len();
                 while self.host_input[0].len() >= chunk {
                     for ch in 0..2 {
                         let head = self.host_input[ch].make_contiguous();
                         self.h2m_in_buf[ch][..chunk].copy_from_slice(&head[..chunk]);
                         self.host_input[ch].drain(..chunk);
                     }
+                    let in_adapter = SequentialSliceOfVecs::new(&self.h2m_in_buf, 2, chunk)
+                        .expect("h2m in-buffer dimensions match");
+                    let mut out_adapter =
+                        SequentialSliceOfVecs::new_mut(&mut self.h2m_out_buf, 2, out_max)
+                            .expect("h2m out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.h2m_in_buf, &mut self.h2m_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     self.mpx_l.reserve(produced);
@@ -327,6 +336,7 @@ impl MpxPipeline {
             }
             Some(r) => {
                 let chunk = self.m2h_chunk;
+                let out_max = self.m2h_out_buf[0].len();
                 while self.decoded_l.len() >= chunk {
                     let head_l = self.decoded_l.make_contiguous();
                     self.m2h_in_buf[0][..chunk].copy_from_slice(&head_l[..chunk]);
@@ -334,8 +344,13 @@ impl MpxPipeline {
                     let head_r = self.decoded_r.make_contiguous();
                     self.m2h_in_buf[1][..chunk].copy_from_slice(&head_r[..chunk]);
                     self.decoded_r.drain(..chunk);
+                    let in_adapter = SequentialSliceOfVecs::new(&self.m2h_in_buf, 2, chunk)
+                        .expect("m2h in-buffer dimensions match");
+                    let mut out_adapter =
+                        SequentialSliceOfVecs::new_mut(&mut self.m2h_out_buf, 2, out_max)
+                            .expect("m2h out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.m2h_in_buf, &mut self.m2h_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     self.host_output[0].reserve(produced);

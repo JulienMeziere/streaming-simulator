@@ -40,7 +40,11 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 png = "0.18"
 fast_image_resize = "6"
 opus = "0.3"
-rubato = "0.16"
+rubato = "2"
+# Buffer adapters required by rubato 2.x's process_into_buffer API. The
+# adapters are zero-alloc — they just store references to existing
+# Vec<Vec<f32>>s and report the dimensions to the resampler.
+audioadapter-buffers = "3"
 # Raw libvorbis bindings. We use this directly (not through `vorbis_rs`) to
 # bypass the Ogg container and operate on raw Vorbis packets — see
 # `docs/codec-implementation.md` for the rationale. `ogg_next_sys` is required

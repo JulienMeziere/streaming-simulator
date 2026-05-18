@@ -4,9 +4,10 @@
 //! (8 subbands, 16 blocks, joint stereo, SNR allocation), bitpool 19 or
 //! 53 for Low / High.
 
+use audioadapter_buffers::direct::SequentialSliceOfVecs;
 use libsbc_sys as sbc_sys;
 use nih_plug::buffer::Buffer;
-use rubato::{FftFixedIn, Resampler};
+use rubato::{Fft, FixedSync, Resampler};
 use std::collections::VecDeque;
 use std::os::raw::c_void;
 
@@ -46,8 +47,8 @@ pub struct SbcCodec {
     channels: usize,
 
     /// `None` when host rate already matches `SBC_RATE`.
-    h2c: Option<FftFixedIn<f32>>,
-    c2h: Option<FftFixedIn<f32>>,
+    h2c: Option<Fft<f32>>,
+    c2h: Option<Fft<f32>>,
     h2c_chunk: usize,
     c2h_chunk: usize,
     h2c_in_buf: Vec<Vec<f32>>,
@@ -143,20 +144,22 @@ impl SbcCodec {
             // ~10 ms chunks — clean rubato cadence at every host rate.
             let h2c_chunk = (self.sample_rate as usize / 100).max(1);
             let c2h_chunk = (SBC_RATE as usize / 100).max(1);
-            let h2c = FftFixedIn::<f32>::new(
+            let h2c = Fft::<f32>::new(
                 self.sample_rate as usize,
                 SBC_RATE as usize,
                 h2c_chunk,
                 RESAMPLER_SUB_CHUNKS,
                 self.channels,
+                FixedSync::Input,
             )
             .expect("SBC h2c resampler init");
-            let c2h = FftFixedIn::<f32>::new(
+            let c2h = Fft::<f32>::new(
                 SBC_RATE as usize,
                 self.sample_rate as usize,
                 c2h_chunk,
                 RESAMPLER_SUB_CHUNKS,
                 self.channels,
+                FixedSync::Input,
             )
             .expect("SBC c2h resampler init");
             let h2c_out_max = h2c.output_frames_max();
@@ -258,15 +261,22 @@ impl SbcCodec {
                 }
             }
             Some(r) => {
-                while self.host_in[0].len() >= self.h2c_chunk {
+                let chunk = self.h2c_chunk;
+                let out_max = self.h2c_out_buf[0].len();
+                while self.host_in[0].len() >= chunk {
                     for ch in 0..self.channels {
                         let head = self.host_in[ch].make_contiguous();
-                        self.h2c_in_buf[ch][..self.h2c_chunk]
-                            .copy_from_slice(&head[..self.h2c_chunk]);
-                        self.host_in[ch].drain(..self.h2c_chunk);
+                        self.h2c_in_buf[ch][..chunk].copy_from_slice(&head[..chunk]);
+                        self.host_in[ch].drain(..chunk);
                     }
+                    let in_adapter =
+                        SequentialSliceOfVecs::new(&self.h2c_in_buf, self.channels, chunk)
+                            .expect("SBC h2c in-buffer dimensions match");
+                    let mut out_adapter =
+                        SequentialSliceOfVecs::new_mut(&mut self.h2c_out_buf, self.channels, out_max)
+                            .expect("SBC h2c out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.h2c_in_buf, &mut self.h2c_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     for ch in 0..self.channels {
@@ -293,15 +303,22 @@ impl SbcCodec {
                 }
             }
             Some(r) => {
-                while self.sbc_out[0].len() >= self.c2h_chunk {
+                let chunk = self.c2h_chunk;
+                let out_max = self.c2h_out_buf[0].len();
+                while self.sbc_out[0].len() >= chunk {
                     for ch in 0..self.channels {
                         let head = self.sbc_out[ch].make_contiguous();
-                        self.c2h_in_buf[ch][..self.c2h_chunk]
-                            .copy_from_slice(&head[..self.c2h_chunk]);
-                        self.sbc_out[ch].drain(..self.c2h_chunk);
+                        self.c2h_in_buf[ch][..chunk].copy_from_slice(&head[..chunk]);
+                        self.sbc_out[ch].drain(..chunk);
                     }
+                    let in_adapter =
+                        SequentialSliceOfVecs::new(&self.c2h_in_buf, self.channels, chunk)
+                            .expect("SBC c2h in-buffer dimensions match");
+                    let mut out_adapter =
+                        SequentialSliceOfVecs::new_mut(&mut self.c2h_out_buf, self.channels, out_max)
+                            .expect("SBC c2h out-buffer dimensions match");
                     let produced = r
-                        .process_into_buffer(&self.c2h_in_buf, &mut self.c2h_out_buf, None)
+                        .process_into_buffer(&in_adapter, &mut out_adapter, None)
                         .map(|(_, out)| out)
                         .unwrap_or(0);
                     for ch in 0..self.channels {
