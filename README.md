@@ -4,6 +4,10 @@ An audio plugin for the master channel that emulates how streaming
 platforms (and Bluetooth, and FM radio) compress and degrade audio, so
 you can hear what your mix will sound like before you ship it.
 
+
+<img width="1460" height="451" alt="image" src="https://github.com/user-attachments/assets/496456a6-641a-439a-8c36-744b2bde1760" />
+
+
 Built in Rust with [nih-plug](https://github.com/robbert-vdh/nih-plug).
 Compiles to **CLAP**, **VST3**, and a **standalone** binary.
 
