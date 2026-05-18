@@ -37,7 +37,7 @@ nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 # format runtimes for what amounts to an 8-icon set. `png` alone shaves
 # ~150 KB off the binary, and `fast_image_resize` is a 2-3× faster
 # Lanczos3 resampler than `image::imageops::Lanczos3`.
-png = "0.17"
+png = "0.18"
 fast_image_resize = "6"
 opus = "0.3"
 rubato = "0.16"
