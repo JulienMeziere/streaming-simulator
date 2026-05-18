@@ -7,6 +7,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # png 0.18 changed Decoder's trait bounds (now requires Seek +
+      # BufRead, not just Read). src/editor/icons.rs would need an
+      # io::Cursor wrapper. Pinning to 0.17.x until we do that port.
+      - dependency-name: png
+        versions: [">=0.18.0"]
+      # rubato 1.0+ ships a redesigned resampler API; FftFixedIn was
+      # moved/renamed. src/processor/pipeline.rs would need a rewrite.
+      - dependency-name: rubato
+        versions: [">=1.0.0"]
     groups:
       cargo-deps:
         patterns:
