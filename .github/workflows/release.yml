@@ -181,7 +181,7 @@ jobs:
           zip -r "../streaming-simulator-${{ steps.tag.outputs.name }}-${{ matrix.target }}.zip" .
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: streaming-simulator-${{ matrix.target }}
           path: streaming-simulator-${{ steps.tag.outputs.name }}-${{ matrix.target }}.zip
