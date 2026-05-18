@@ -1,0 +1,217 @@
+name: Release
+
+# Builds CLAP + VST3 (and standalone where applicable) for Linux x86_64,
+# Windows x86_64, and macOS aarch64, then attaches them as zip assets to
+# the GitHub Release for the tag.
+#
+# Triggered automatically on pushed `v*` tags, or manually via the
+# Actions tab (workflow_dispatch) — pick a tag from the dropdown and
+# the workflow will build + attach to that tag's release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build a release for (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-latest
+          - target: windows-x86_64
+            runner: windows-latest
+          # macOS uses `bundle-universal`: builds for both aarch64 and
+          # x86_64 and lipos them into a single fat bundle that runs on
+          # Apple Silicon AND Intel Macs. Single zip covers all macOS users.
+          - target: macos-universal
+            runner: macos-latest
+
+    steps:
+      - name: Checkout (tag from push)
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+
+      - name: Checkout (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Linux GUI + audio dev headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-icccm4-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxkbcommon-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # macOS needs both targets installed for `bundle-universal`.
+      - name: Install macOS targets
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      # libsbc-sys's vendored BlueZ source mixes POSIX assumptions (stdint.h
+      # transitively included, ssize_t available) and GCC attribute syntax
+      # that MSVC can't parse. Patch all three by force-including a small
+      # shim header (see scripts/msvc-libsbc-shim.h) into every C TU.
+      - name: Configure MSVC build env
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          shim="${GITHUB_WORKSPACE}/scripts/msvc-libsbc-shim.h"
+          echo "CFLAGS_x86_64_pc_windows_msvc=-FI ${shim}" >> "$GITHUB_ENV"
+
+      # macos-latest ships CMake 4.x which dropped compatibility with
+      # `cmake_minimum_required(VERSION < 3.5)`. Several transitive deps
+      # build through CMake (audiopus_sys → libopus, etc.) and still use
+      # an older minimum. CMake reads this env var as the legacy policy
+      # floor.
+      #
+      # Plus: libsbc-sys 0.1.2 always compiles `sbc_primitives_neon.c`,
+      # whose inline asm is *ARMv7-only* (vmov.s32 / vadd.s32 etc.). On
+      # Apple Silicon clang predefines __ARM_NEON__, which trips
+      # SBC_BUILD_WITH_NEON_SUPPORT and tries to assemble those legacy
+      # mnemonics on AArch64. Undefining the trailing-underscore alias
+      # bypasses the file (Opus and other modern code use __ARM_NEON
+      # without underscores, which still works).
+      - name: Configure macOS build env
+        if: runner.os == 'macOS'
+        run: |
+          echo 'CMAKE_POLICY_VERSION_MINIMUM=3.5' >> "$GITHUB_ENV"
+          echo 'CFLAGS_aarch64_apple_darwin=-U__ARM_NEON__' >> "$GITHUB_ENV"
+          echo 'CFLAGS_x86_64_apple_darwin=-U__ARM_NEON__' >> "$GITHUB_ENV"
+
+      - name: Build plugin bundle (CLAP + VST3, native)
+        if: runner.os != 'macOS'
+        run: cargo xtask bundle streaming-simulator --release --features fdk-aac
+
+      - name: Build plugin bundle (CLAP + VST3, universal)
+        if: runner.os == 'macOS'
+        run: cargo xtask bundle-universal streaming-simulator --release --features fdk-aac
+
+      # Standalone is skipped on macOS — distributing a runnable binary
+      # would need code signing + notarization (and CoreAudio setup) for a
+      # decent UX. Plugin formats only on macOS, per design.
+      - name: Build standalone binary
+        if: runner.os != 'macOS'
+        run: cargo build --release --features "standalone fdk-aac" --bin streaming-simulator
+
+      - name: Resolve tag name
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stage release files (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release
+          cp -r "target/bundled/Streaming Simulator.clap" release/
+          cp -r "target/bundled/Streaming Simulator.vst3" release/
+          cp target/release/streaming-simulator release/streaming-simulator-standalone
+          cd release
+          zip -r "../streaming-simulator-${{ steps.tag.outputs.name }}-${{ matrix.target }}.zip" .
+
+      - name: Stage release files (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release | Out-Null
+          Copy-Item -Recurse "target/bundled/Streaming Simulator.clap" release/
+          Copy-Item -Recurse "target/bundled/Streaming Simulator.vst3" release/
+          Copy-Item "target/release/streaming-simulator.exe" "release/streaming-simulator-standalone.exe"
+          $zip = "streaming-simulator-${{ steps.tag.outputs.name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path release/* -DestinationPath $zip
+
+      - name: Stage release files (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release
+          cp -R "target/bundled/Streaming Simulator.clap" release/
+          cp -R "target/bundled/Streaming Simulator.vst3" release/
+          # Bundle a tiny note explaining the xattr workaround so the zip
+          # is self-contained — users won't have to come back to the README
+          # to figure out why their DAW won't load the plugin.
+          cat > "release/READ ME FIRST (macOS).txt" <<'EOF'
+          Streaming Simulator is shipped UNSIGNED on macOS. macOS will
+          quarantine the plugin on download and the DAW will refuse to
+          load it. To clear that, open Terminal in this folder and run:
+
+              xattr -dr com.apple.quarantine "Streaming Simulator.clap"
+              xattr -dr com.apple.quarantine "Streaming Simulator.vst3"
+
+          Then move the bundles into your CLAP / VST3 folder.
+
+          (This is a one-time step. Apple's signing fee is $99/yr; the
+          plugin is GPL'd hobby code, not commercial software.)
+          EOF
+          cd release
+          zip -r "../streaming-simulator-${{ steps.tag.outputs.name }}-${{ matrix.target }}.zip" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: streaming-simulator-${{ matrix.target }}
+          path: streaming-simulator-${{ steps.tag.outputs.name }}-${{ matrix.target }}.zip
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          files: artifacts/*.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          draft: false

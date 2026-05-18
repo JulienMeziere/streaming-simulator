@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # nih_plug_egui pulls in baseview / X11 / GL / XCB — these dev
+      # headers are needed for `cargo build --lib` to succeed on a fresh
+      # ubuntu-latest runner. The `x11` crate's build script panics on
+      # missing `gl.pc` / `x11-xcb.pc`, so the list has to include those.
+      - name: Install GUI + audio dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-icccm4-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxkbcommon-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (with fdk-aac)
+        run: cargo build --features fdk-aac --lib
+
+      - name: Clippy
+        run: cargo clippy --features fdk-aac --lib --no-deps
+
+      - name: Tests
+        run: cargo test --features fdk-aac --lib

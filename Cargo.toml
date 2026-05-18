@@ -1,0 +1,84 @@
+[package]
+name = "streaming-simulator"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["Julien Meziere"]
+description = "An audio plugin that emulates streaming platform encoding artifacts"
+repository = "https://github.com/JulienMeziere/streaming-simulator"
+
+[workspace]
+members = ["xtask"]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "streaming-simulator"
+required-features = ["standalone"]
+
+[features]
+default = []
+# Builds a standalone binary that runs the plugin directly via the OS audio
+# backend (ALSA/JACK on Linux, CoreAudio on macOS, ASIO/WASAPI on Windows).
+# On Linux this requires the ALSA dev headers (`libasound2-dev`).
+standalone = ["nih_plug/standalone"]
+# Enables the AAC-LC and HE-AAC v2 codecs by linking Fraunhofer's FDK-AAC.
+# Off by default so a vanilla `cargo build` doesn't pull in the C++ build of
+# FDK or the LP64 cross-compile workaround. **Official release builds enable
+# this feature** — see docs/licensing.md for the GPL/FDK situation.
+fdk-aac = ["dep:fdk-aac"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+# Direct PNG decoding for the embedded platform icons. We previously used
+# the higher-level `image` crate, but it pulls in DynamicImage + several
+# format runtimes for what amounts to an 8-icon set. `png` alone shaves
+# ~150 KB off the binary, and `fast_image_resize` is a 2-3× faster
+# Lanczos3 resampler than `image::imageops::Lanczos3`.
+png = "0.17"
+fast_image_resize = "6"
+opus = "0.3"
+rubato = "0.16"
+# Raw libvorbis bindings. We use this directly (not through `vorbis_rs`) to
+# bypass the Ogg container and operate on raw Vorbis packets — see
+# `docs/codec-implementation.md` for the rationale. `ogg_next_sys` is required
+# because libvorbis's C API exchanges packets as `ogg_packet` structs even
+# when we skip Ogg paging.
+aotuv_lancer_vorbis_sys = "0.1"
+ogg_next_sys = "0.1"
+# Optional (see `fdk-aac` feature). Provides AAC-LC + HE-AAC v2 codecs.
+fdk-aac = { version = "0.7", optional = true }
+# LAME MP3 encoder. LGPL-2.1-or-later — fine to bundle with our GPL-3.0 plugin.
+# Used by Deezer's Basic / Standard / High Quality tiers.
+mp3lame-encoder = "0.2"
+# minimp3 raw FFI bindings — used as the decoder side of the MP3 round trip.
+# We use the -sys crate directly (not the high-level `minimp3` wrapper) because
+# the decoder needs persistent state across frame decodes for the MP3 bit
+# reservoir, which the wrapper's Reader-based API makes awkward to feed in
+# real time.
+minimp3-sys = "0.6"
+# Bluetooth A2DP SBC codec — the universal mandatory baseline every BT device
+# supports. FFI binding to BlueZ's libsbc; the crate's `source-build` feature
+# (on by default) vendors the C sources and compiles them via `cc`, so no
+# system libsbc install is needed for either native or cross-compile builds.
+# LGPL-2.1+ — fine to bundle with our GPL-3.0 plugin.
+libsbc-sys = "0.1"
+# Pure-Rust LC3 codec used by Bluetooth LE Audio (BT 5.2+). Apache 2.0 + MIT,
+# no_std-compatible, zero FFI. Used for the LE Audio presets in the Bluetooth
+# simulation layer.
+lc3-codec = "0.2"
+
+[profile.release]
+# Fat LTO across all crates produces ~5-10% better DSP performance than
+# `thin` at the cost of ~30 s extra link time. Worth it for a real-time
+# audio plugin that spends its life in inner loops.
+lto = "fat"
+strip = "symbols"
+codegen-units = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
