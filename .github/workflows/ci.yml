@@ -14,7 +14,7 @@ jobs:
     name: Test (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # nih_plug_egui pulls in baseview / X11 / GL / XCB — these dev
       # headers are needed for `cargo build --lib` to succeed on a fresh
